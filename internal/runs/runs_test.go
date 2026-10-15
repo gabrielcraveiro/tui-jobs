@@ -26,12 +26,12 @@ func TestBeginFinishList(t *testing.T) {
 		t.Error("run must have no End before Finish")
 	}
 
-	if err := store.Finish(run, 3, ""); err != nil {
+	if err := store.Finish(run, 3, 4096, ""); err != nil {
 		t.Fatal(err)
 	}
 	list, _ = store.List("scrap", 0)
-	if list[0].End == nil || list[0].ExitCode != 3 {
-		t.Errorf("after Finish: End=%v ExitCode=%d; want End set and ExitCode 3", list[0].End, list[0].ExitCode)
+	if list[0].End == nil || list[0].ExitCode != 3 || list[0].PeakRSS != 4096 {
+		t.Errorf("after Finish: End=%v ExitCode=%d PeakRSS=%d; want End set, ExitCode 3, PeakRSS 4096", list[0].End, list[0].ExitCode, list[0].PeakRSS)
 	}
 	if data, _ := os.ReadFile(store.LogPath(list[0])); string(data) != "hello" {
 		t.Errorf("log = %q; want %q", data, "hello")
@@ -46,7 +46,7 @@ func TestListNewestFirstAndPrune(t *testing.T) {
 			t.Fatal(err)
 		}
 		logFile.Close()
-		store.Finish(run, i, "")
+		store.Finish(run, i, 0, "")
 	}
 
 	list, _ := store.List("scrap", 2)

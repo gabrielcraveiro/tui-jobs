@@ -33,51 +33,60 @@ func Exec(store *runs.Store, job string, command []string, stdout, stderr io.Wri
 	defer logFile.Close()
 
 	// Espelhar no stdout mantém funcionando os ">> arquivo.log" que já existem no crontab.
-	code, waitOutput, execErr := execute(command, io.MultiWriter(stdout, logFile), io.MultiWriter(stderr, logFile))
+	res, waitOutput := execute(command, io.MultiWriter(stdout, logFile), io.MultiWriter(stderr, logFile))
 	errMsg := ""
-	if execErr != nil {
-		errMsg = execErr.Error()
+	if res.err != nil {
+		errMsg = res.err.Error()
 	}
-	if err := store.Finish(run, code, errMsg); err != nil {
+	if err := store.Finish(run, res.code, res.peakRSS, errMsg); err != nil {
 		fmt.Fprintf(stderr, "bw: cannot record end of run: %v\n", err)
 	}
 	// O fim do job já está gravado. Um processo que ele deixou em background
 	// pode ter herdado a saída: o bw segue copiando para o log até ela fechar,
 	// como o cron faz.
 	waitOutput()
-	if execErr != nil {
-		fmt.Fprintf(io.MultiWriter(stderr, logFile), "bw: %v\n", execErr)
+	if res.err != nil {
+		fmt.Fprintf(io.MultiWriter(stderr, logFile), "bw: %v\n", res.err)
 	}
 	if err := store.Prune(job, keepRuns); err != nil {
 		fmt.Fprintf(stderr, "bw: cannot prune old runs: %v\n", err)
 	}
-	return code
+	return res.code
 }
 
 func executeUnrecorded(command []string, stdout, stderr io.Writer) int {
-	code, waitOutput, err := execute(command, stdout, stderr)
+	res, waitOutput := execute(command, stdout, stderr)
 	waitOutput()
-	if err != nil {
-		fmt.Fprintf(stderr, "bw: %v\n", err)
+	if res.err != nil {
+		fmt.Fprintf(stderr, "bw: %v\n", res.err)
 	}
-	return code
+	return res.code
 }
 
-// execute espera só o processo principal e devolve o exit code no padrão do
-// shell: 128+N quando o processo morre pelo sinal N e 127 quando o comando
-// nem chega a iniciar. A cópia da saída continua até todos os processos que a
-// herdaram fecharem; waitOutput espera esse fim.
-func execute(command []string, stdout, stderr io.Writer) (code int, waitOutput func(), err error) {
+// result é o que o bw sabe quando o processo principal sai.
+type result struct {
+	// code segue o padrão do shell: 128+N quando o processo morre pelo sinal
+	// N e 127 quando o comando nem chega a iniciar.
+	code int
+	// peakRSS é o maior RSS entre o processo e os filhos que ele esperou, em
+	// bytes. O kernel guarda o pico, então vale até para job de segundos.
+	peakRSS int64
+	err     error
+}
+
+// execute espera só o processo principal. A cópia da saída continua até todos
+// os processos que a herdaram fecharem; waitOutput espera esse fim.
+func execute(command []string, stdout, stderr io.Writer) (res result, waitOutput func()) {
 	var copying sync.WaitGroup
 	var mu sync.Mutex
 	outW, err := pipeTo(lockedWriter{&mu, stdout}, &copying)
 	if err != nil {
-		return 1, copying.Wait, err
+		return result{code: 1, err: err}, copying.Wait
 	}
 	errW, err := pipeTo(lockedWriter{&mu, stderr}, &copying)
 	if err != nil {
 		outW.Close()
-		return 1, copying.Wait, err
+		return result{code: 1, err: err}, copying.Wait
 	}
 
 	cmd := exec.Command(command[0], command[1:]...)
@@ -88,23 +97,27 @@ func execute(command []string, stdout, stderr io.Writer) (code int, waitOutput f
 	outW.Close()
 	errW.Close()
 	if startErr != nil {
-		return 127, copying.Wait, startErr
+		return result{code: 127, err: startErr}, copying.Wait
 	}
 
 	stop := forwardSignals(cmd.Process)
 	err = cmd.Wait()
 	stop()
 	if cmd.ProcessState == nil {
-		return 1, copying.Wait, err
+		return result{code: 1, err: err}, copying.Wait
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		err = nil // exit code diferente de zero é resultado do job, não erro do bw
 	}
-	if status, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok && status.Signaled() {
-		return 128 + int(status.Signal()), copying.Wait, err
+	res = result{code: cmd.ProcessState.ExitCode(), err: err}
+	if usage, ok := cmd.ProcessState.SysUsage().(*syscall.Rusage); ok {
+		res.peakRSS = usage.Maxrss * 1024 // no Linux, Maxrss vem em KiB
 	}
-	return cmd.ProcessState.ExitCode(), copying.Wait, err
+	if status, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+		res.code = 128 + int(status.Signal())
+	}
+	return res, copying.Wait
 }
 
 // pipeTo devolve a ponta de escrita de um pipe copiado para dst. Com um

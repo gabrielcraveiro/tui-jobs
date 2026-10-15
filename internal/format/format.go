@@ -89,6 +89,34 @@ func Schedule(j monitor.Job) string {
 	return string(j.Source)
 }
 
+// Bytes resume memória no estilo do htop: "512K", "85M", "1.2G". Zero vira "-".
+func Bytes(n int64) string {
+	const kib, mib, gib = 1 << 10, 1 << 20, 1 << 30
+	switch {
+	case n <= 0:
+		return "-"
+	case n < mib:
+		return fmt.Sprintf("%dK", n/kib)
+	case n < gib:
+		return fmt.Sprintf("%dM", n/mib)
+	default:
+		return fmt.Sprintf("%.1fG", float64(n)/gib)
+	}
+}
+
+// Memory descreve a memória do job: o RSS atual se está rodando, senão o
+// pico da última execução ("85M peak"). Sem medida vira "-".
+func Memory(j monitor.Job) string {
+	switch {
+	case j.Memory > 0:
+		return Bytes(j.Memory)
+	case j.PeakMemory > 0:
+		return Bytes(j.PeakMemory) + " peak"
+	default:
+		return "-"
+	}
+}
+
 // Truncate corta s em width colunas, terminando com "…".
 func Truncate(s string, width int) string {
 	return ansi.Truncate(s, width, "…")

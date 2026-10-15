@@ -15,13 +15,14 @@ const nameWidth = 32
 
 func printJobs(w io.Writer, jobs []monitor.Job, now time.Time) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "JOB\tSCHEDULE\tLAST RUN\tDURATION\tNEXT\tSTATUS")
+	fmt.Fprintln(tw, "JOB\tSCHEDULE\tLAST RUN\tDURATION\tMEMORY\tNEXT\tSTATUS")
 	for _, j := range jobs {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s %s\n",
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s %s\n",
 			format.Truncate(j.Name, nameWidth),
 			format.Schedule(j),
 			format.Clock(j.Started, now),
 			format.Duration(j.Duration),
+			format.Memory(j),
 			format.Clock(j.Next, now),
 			format.Icon(j.State),
 			format.Label(j),

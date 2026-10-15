@@ -38,6 +38,7 @@ type Run struct {
 	End      *time.Time `json:"end,omitempty"`
 	ExitCode int        `json:"exit_code"`
 	Error    string     `json:"error,omitempty"`
+	PeakRSS  int64      `json:"peak_rss,omitempty"` // em bytes; zero enquanto roda
 
 	id string // nome base dos arquivos, sem extensão
 }
@@ -109,9 +110,9 @@ func (s *Store) Begin(job string, command []string) (*Run, *os.File, error) {
 }
 
 // Finish grava o fim da execução.
-func (s *Store) Finish(r *Run, exitCode int, errMsg string) error {
+func (s *Store) Finish(r *Run, exitCode int, peakRSS int64, errMsg string) error {
 	end := time.Now()
-	r.End, r.ExitCode, r.Error = &end, exitCode, errMsg
+	r.End, r.ExitCode, r.PeakRSS, r.Error = &end, exitCode, peakRSS, errMsg
 	return s.save(r)
 }
 

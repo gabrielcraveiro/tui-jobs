@@ -28,6 +28,9 @@ func TestExecRecordsRunAndMirrorsOutput(t *testing.T) {
 	if run.End == nil || run.ExitCode != 0 {
 		t.Errorf("recorded End=%v ExitCode=%d; want finished with 0", run.End, run.ExitCode)
 	}
+	if run.PeakRSS <= 0 {
+		t.Errorf("recorded PeakRSS = %d; want the peak memory of the command", run.PeakRSS)
+	}
 	log, _ := os.ReadFile(store.LogPath(run))
 	if !strings.Contains(string(log), "out") || !strings.Contains(string(log), "err") {
 		t.Errorf("log = %q; want stdout and stderr", log)

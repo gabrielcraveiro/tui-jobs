@@ -35,9 +35,9 @@ func sampleBackend() *fakeBackend {
 	return &fakeBackend{
 		jobs: []monitor.Job{
 			{Name: "pokescrap", Source: monitor.Cron, Schedule: "*/15 * * * *", Command: "bw run pokescrap -- ./run.sh",
-				State: monitor.OK, Started: now.Add(-3 * time.Minute), Duration: 37 * time.Second},
+				State: monitor.OK, Started: now.Add(-3 * time.Minute), Duration: 37 * time.Second, PeakMemory: 90 << 20},
 			{Name: "ecovias-bot", Source: monitor.Systemd, Description: "Bot do Telegram",
-				State: monitor.Running, Started: now.Add(-time.Hour), Duration: time.Hour},
+				State: monitor.Running, Started: now.Add(-time.Hour), Duration: time.Hour, Memory: 50 << 20},
 			{Name: "nuvio/run_daily.sh", Source: monitor.Cron, Schedule: "0 6 * * *", Command: "/opt/nuvio/run_daily.sh",
 				State: monitor.Unwatched},
 			{Name: "prices", Source: monitor.Cron, Schedule: "*/10 * * * *", Command: "bw run prices -- ./p.sh",
@@ -93,7 +93,7 @@ func screen(m model) string {
 func TestShowsJobsSummaryAndSelectedLog(t *testing.T) {
 	out := screen(start(t, sampleBackend(), 120, 30))
 
-	for _, want := range []string{"4 jobs", "▶ 1 running", "✗ 1 failing", "pokescrap", "ecovias-bot", "prices", "✓ ok", "scraped 42 cards"} {
+	for _, want := range []string{"4 jobs", "▶ 1 running", "✗ 1 failing", "pokescrap", "ecovias-bot", "prices", "✓ ok", "scraped 42 cards", "50M in use", "peak 90M RAM"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("screen must contain %q", want)
 		}
@@ -110,6 +110,9 @@ func TestMovingSelectionShowsThatJobsLog(t *testing.T) {
 	}
 	if !strings.Contains(out, "systemd service · Bot do Telegram") {
 		t.Error("details must describe the systemd service")
+	}
+	if !strings.Contains(out, "50M RAM now") {
+		t.Error("details must show the memory of the running service")
 	}
 }
 

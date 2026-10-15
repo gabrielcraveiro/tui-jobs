@@ -22,6 +22,8 @@ const (
 	whenWidth = 6
 	// scheduleWidth cabe "*/15 * * * *"; agendas maiores são cortadas.
 	scheduleWidth = 13
+	// memWidth cabe "512K", "85M" e "1.2G".
+	memWidth = 5
 )
 
 // layout guarda o tamanho externo, com borda, de cada painel.
@@ -37,7 +39,7 @@ func (m model) layout() layout {
 		listH := max(min(len(m.jobs)+2, bodyH/2), 3)
 		return layout{stacked: true, listW: m.width, listH: listH, sideW: m.width, sideH: bodyH - listH}
 	}
-	listW := min(max(m.width*2/5, 44), 64)
+	listW := min(max(m.width*9/20, 44), 70)
 	return layout{listW: listW, listH: bodyH, sideW: m.width - listW, sideH: bodyH}
 }
 
@@ -131,6 +133,14 @@ func (m model) renderCounts() string {
 	add(running, monitor.Running, "running")
 	add(failing, monitor.Failed, "failing")
 	add(late, monitor.Late, "late")
+
+	var memory int64
+	for _, j := range m.jobs {
+		memory += j.Memory
+	}
+	if memory > 0 {
+		parts = append(parts, m.colors.fg(m.colors.dim).Render(format.Bytes(memory)+" in use"))
+	}
 	return strings.Join(parts, "  ")
 }
 
@@ -148,9 +158,9 @@ func (m model) renderList(w, h int) string {
 	return strings.Join(rows, "\n")
 }
 
-// renderRow monta ícone, nome, agenda (se couber) e quando rodou. Cada pedaço
-// recebe o fundo da seleção: um fundo aplicado por fora seria apagado pelo
-// reset de cor de cada pedaço.
+// renderRow monta ícone, nome, agenda (se couber), memória e quando rodou.
+// Cada pedaço recebe o fundo da seleção: um fundo aplicado por fora seria
+// apagado pelo reset de cor de cada pedaço.
 func (m model) renderRow(j monitor.Job, selected bool, w int) string {
 	base := lipgloss.NewStyle()
 	if selected {
@@ -158,10 +168,17 @@ func (m model) renderRow(j monitor.Job, selected bool, w int) string {
 	}
 	dim := base.Foreground(m.colors.dim)
 
-	nameW := w - 2 - (whenWidth + 1)
+	nameW := w - 2 - (memWidth + 1) - (whenWidth + 1)
 	showSchedule := nameW-(scheduleWidth+1) >= 16
 	if showSchedule {
 		nameW -= scheduleWidth + 1
+	}
+
+	// Na lista só entra a memória de agora: o pico de um job que já terminou
+	// fica nos detalhes, para a coluna não misturar as duas coisas.
+	memory := ""
+	if j.Memory > 0 {
+		memory = format.Bytes(j.Memory)
 	}
 
 	row := base.Foreground(m.colors.state[j.State]).Render(format.Icon(j.State)) +
@@ -170,7 +187,9 @@ func (m model) renderRow(j monitor.Job, selected bool, w int) string {
 	if showSchedule {
 		row += base.Render(" ") + dim.Width(scheduleWidth).Render(format.Truncate(format.Schedule(j), scheduleWidth))
 	}
-	return row + base.Render(" ") + dim.Width(whenWidth).Render(fmt.Sprintf("%*s", whenWidth, m.when(j)))
+	return row +
+		base.Render(" ") + base.Width(memWidth).Render(fmt.Sprintf("%*s", memWidth, memory)) +
+		base.Render(" ") + dim.Width(whenWidth).Render(fmt.Sprintf("%*s", whenWidth, m.when(j)))
 }
 
 // when resume, em até 6 colunas, há quanto tempo o job roda ou quando rodou.
@@ -224,6 +243,12 @@ func (m model) details(j monitor.Job, w int) []string {
 		last = "running since " + format.Clock(j.Started, m.now) + " · " + format.Duration(j.Duration)
 	default:
 		last = "last run " + format.Clock(j.Started, m.now) + " · took " + format.Duration(j.Duration)
+	}
+	switch {
+	case j.Memory > 0:
+		last += " · " + format.Bytes(j.Memory) + " RAM now"
+	case j.PeakMemory > 0:
+		last += " · peak " + format.Bytes(j.PeakMemory) + " RAM"
 	}
 
 	command := "$ " + j.Command
