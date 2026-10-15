@@ -39,24 +39,44 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
-	store := runs.NewStore(runs.DefaultDir())
-	switch {
-	case len(args) == 0:
+	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return 2
-	case args[0] == "run":
+	}
+	switch args[0] {
+	case "run":
+		// Sem diretório de histórico o job ainda roda, só não fica registrado.
+		store, _ := openStore(stderr)
 		return cmdRun(args[1:], store, stdout, stderr)
-	case args[0] == "ls":
+	case "ls":
+		store, ok := openStore(stderr)
+		if !ok {
+			return 1
+		}
 		return cmdLs(store, stdout, stderr)
-	case args[0] == "logs":
+	case "logs":
+		store, ok := openStore(stderr)
+		if !ok {
+			return 1
+		}
 		return cmdLogs(args[1:], store, stdout, stderr)
-	case args[0] == "help", args[0] == "-h", args[0] == "--help":
+	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)
 		return 0
 	default:
 		fmt.Fprintf(stderr, "bw: unknown command %q\n\n%s", args[0], usage)
 		return 2
 	}
+}
+
+// openStore abre o histórico ou explica no stderr por que não deu.
+func openStore(stderr io.Writer) (*runs.Store, bool) {
+	dir, err := runs.DefaultDir()
+	if err != nil {
+		fmt.Fprintf(stderr, "bw: %v\n", err)
+		return nil, false
+	}
+	return runs.NewStore(dir), true
 }
 
 // cmdRun exige o "--" para que flags do comando nunca sejam lidas como flags
