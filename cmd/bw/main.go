@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,14 +11,18 @@ import (
 
 	"github.com/gabrielcraveiro/tui-jobs/internal/crontab"
 	"github.com/gabrielcraveiro/tui-jobs/internal/monitor"
+	"github.com/gabrielcraveiro/tui-jobs/internal/procs"
 	"github.com/gabrielcraveiro/tui-jobs/internal/runner"
 	"github.com/gabrielcraveiro/tui-jobs/internal/runs"
 	"github.com/gabrielcraveiro/tui-jobs/internal/systemd"
+	"github.com/gabrielcraveiro/tui-jobs/internal/tui"
 )
 
 const usage = `bw watches cron jobs, systemd user services and long-running bots.
 
 Usage:
+  bw
+      Open the interactive view: job list, details and live log.
   bw run <job> -- <command> [args...]
       Run the command and record the run: start, end, exit code and output.
       bw exits with the exit code of the command.
@@ -40,8 +45,15 @@ func main() {
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprint(stderr, usage)
-		return 2
+		store, ok := openStore(stderr)
+		if !ok {
+			return 1
+		}
+		if err := tui.Run(backend{store: store}); err != nil {
+			fmt.Fprintf(stderr, "bw: %v\n", err)
+			return 1
+		}
+		return 0
 	}
 	switch args[0] {
 	case "run":
@@ -91,7 +103,10 @@ func cmdRun(args []string, store *runs.Store, stdout, stderr io.Writer) int {
 
 func cmdLs(store *runs.Store, stdout, stderr io.Writer) int {
 	now := time.Now()
-	jobs, err := loadJobs(store, now, stderr)
+	jobs, warning, err := loadJobs(store, now)
+	if warning != nil {
+		fmt.Fprintf(stderr, "bw: %v\n", warning)
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "bw: %v\n", err)
 		return 1
@@ -143,22 +158,27 @@ func cmdLogs(args []string, store *runs.Store, stdout, stderr io.Writer) int {
 }
 
 // loadJobs junta todas as fontes. Uma fonte fora do ar (sem crontab, sem
-// systemd de usuário) vira aviso: o resto da lista continua útil.
-func loadJobs(store *runs.Store, now time.Time, stderr io.Writer) ([]monitor.Job, error) {
+// systemd de usuário) volta como warning, e o resto da lista continua útil.
+// Quem chama decide onde mostrar o aviso: com a TUI aberta, escrever no
+// stderr estragaria a tela.
+func loadJobs(store *runs.Store, now time.Time) (jobs []monitor.Job, warning, err error) {
+	var warnings []error
 	entries, err := crontab.Load()
 	if err != nil {
-		fmt.Fprintf(stderr, "bw: %v\n", err)
+		warnings = append(warnings, err)
 	}
 	units, err := systemd.Load()
 	if err != nil {
-		fmt.Fprintf(stderr, "bw: %v\n", err)
+		warnings = append(warnings, err)
 	}
-	return monitor.Build(monitor.Sources{
+	jobs, err = monitor.Build(monitor.Sources{
 		Crontab: entries,
 		Units:   units,
 		History: store,
 		Alive:   runs.Alive,
+		Memory:  procs.Read(),
 	}, now)
+	return jobs, errors.Join(warnings...), err
 }
 
 func copyFile(w io.Writer, path string) error {

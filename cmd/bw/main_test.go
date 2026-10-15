@@ -9,7 +9,6 @@ import (
 func TestUsageErrors(t *testing.T) {
 	t.Setenv("BOTWATCHER_DIR", t.TempDir())
 	for _, args := range [][]string{
-		{},
 		{"nope"},
 		{"run"},
 		{"run", "job", "echo", "hi"}, // sem "--"

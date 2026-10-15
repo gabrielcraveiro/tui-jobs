@@ -26,9 +26,10 @@ type Unit struct {
 	Until       time.Time // quando saiu do estado ativo pela última vez
 	ExitStatus  int       // exit code da última vez que o processo principal terminou
 	Restarts    int       // reinícios automáticos desde o último start manual
+	Cgroup      string    // caminho do cgroup, onde estão os processos do serviço
 }
 
-const properties = "Id,Description,ActiveState,SubState,ActiveEnterTimestamp,InactiveEnterTimestamp,ExecMainStatus,NRestarts"
+const properties = "Id,Description,ActiveState,SubState,ActiveEnterTimestamp,InactiveEnterTimestamp,ExecMainStatus,NRestarts,ControlGroup"
 
 // Load devolve os serviços definidos em ~/.config/systemd/user. Serviços do
 // sistema e de pacotes ficam de fora: não foram criados pelo usuário.
@@ -45,12 +46,22 @@ func Load() ([]Unit, error) {
 	return parseShow(string(out)), nil
 }
 
-// WriteLogs escreve em w as últimas lines linhas do journal do serviço.
+// WriteLogs escreve em w as últimas lines linhas do journal do serviço. O
+// hostname fica de fora: é sempre a mesma máquina e só ocupa espaço na tela.
 func WriteLogs(w io.Writer, name string, lines int) error {
 	cmd := exec.Command("journalctl", "--user", "--unit", name+".service",
-		"--lines", strconv.Itoa(lines), "--no-pager")
+		"--lines", strconv.Itoa(lines), "--no-pager", "--no-hostname")
 	cmd.Stdout, cmd.Stderr = w, w
 	return cmd.Run()
+}
+
+// Restart reinicia o serviço. Com o serviço parado, só inicia.
+func Restart(name string) error {
+	out, err := exec.Command("systemctl", "--user", "restart", name+".service").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("systemctl --user restart %s: %w: %s", name, err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func userServices() ([]string, error) {
@@ -98,6 +109,7 @@ func parseShow(text string) []Unit {
 			Until:       parseTimestamp(props["InactiveEnterTimestamp"]),
 			ExitStatus:  atoi(props["ExecMainStatus"]),
 			Restarts:    atoi(props["NRestarts"]),
+			Cgroup:      props["ControlGroup"],
 		})
 	}
 	return units

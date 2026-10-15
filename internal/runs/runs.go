@@ -6,9 +6,11 @@
 package runs
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -36,6 +38,7 @@ type Run struct {
 	End      *time.Time `json:"end,omitempty"`
 	ExitCode int        `json:"exit_code"`
 	Error    string     `json:"error,omitempty"`
+	PeakRSS  int64      `json:"peak_rss,omitempty"` // em bytes; zero enquanto roda
 
 	id string // nome base dos arquivos, sem extensão
 }
@@ -107,9 +110,9 @@ func (s *Store) Begin(job string, command []string) (*Run, *os.File, error) {
 }
 
 // Finish grava o fim da execução.
-func (s *Store) Finish(r *Run, exitCode int, errMsg string) error {
+func (s *Store) Finish(r *Run, exitCode int, peakRSS int64, errMsg string) error {
 	end := time.Now()
-	r.End, r.ExitCode, r.Error = &end, exitCode, errMsg
+	r.End, r.ExitCode, r.PeakRSS, r.Error = &end, exitCode, peakRSS, errMsg
 	return s.save(r)
 }
 
@@ -185,6 +188,32 @@ func (s *Store) Prune(job string, keep int) error {
 // LogPath devolve o arquivo com stdout+stderr da execução.
 func (s *Store) LogPath(r Run) string {
 	return s.path(r.Job, r.id, ".log")
+}
+
+// Tail devolve no máximo os últimos maxBytes do log da execução. Bot de longa
+// duração gera log grande, e a tela só mostra o fim.
+func (s *Store) Tail(r Run, maxBytes int64) (string, error) {
+	f, err := os.Open(s.LogPath(r))
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	offset := max(info.Size()-maxBytes, 0)
+	data := make([]byte, info.Size()-offset)
+	if _, err := f.ReadAt(data, offset); err != nil && !errors.Is(err, io.EOF) {
+		return "", err
+	}
+	if offset > 0 {
+		// A primeira linha quase sempre vem cortada no meio.
+		if i := bytes.IndexByte(data, '\n'); i >= 0 {
+			data = data[i+1:]
+		}
+	}
+	return string(data), nil
 }
 
 // Alive diz se o processo do bw run de r ainda existe. O boot ID vem antes do

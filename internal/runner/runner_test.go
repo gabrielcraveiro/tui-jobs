@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gabrielcraveiro/tui-jobs/internal/runner"
 	"github.com/gabrielcraveiro/tui-jobs/internal/runs"
@@ -26,6 +27,9 @@ func TestExecRecordsRunAndMirrorsOutput(t *testing.T) {
 	run := lastRun(t, store, "hello")
 	if run.End == nil || run.ExitCode != 0 {
 		t.Errorf("recorded End=%v ExitCode=%d; want finished with 0", run.End, run.ExitCode)
+	}
+	if run.PeakRSS <= 0 {
+		t.Errorf("recorded PeakRSS = %d; want the peak memory of the command", run.PeakRSS)
 	}
 	log, _ := os.ReadFile(store.LogPath(run))
 	if !strings.Contains(string(log), "out") || !strings.Contains(string(log), "err") {
@@ -82,6 +86,30 @@ func TestExecRunsCommandWhenHistoryFails(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "cannot record run") {
 		t.Errorf("stderr = %q; want a warning", stderr.String())
+	}
+}
+
+// Um script que deixa um processo em background sem redirecionar a saída
+// (comum em "bot &") não pode prender o estado em "running".
+func TestExecRecordsEndWhenMainProcessExits(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: waits for a background process")
+	}
+	store := runs.NewStore(t.TempDir())
+	var out bytes.Buffer
+
+	code := runner.Exec(store, "daemon", []string{"sh", "-c", "(sleep 1; echo late) & echo now"}, &out, &out)
+
+	run := lastRun(t, store, "daemon")
+	if code != 0 || run.End == nil {
+		t.Fatalf("exit code = %d, End = %v; want 0 and a finished run", code, run.End)
+	}
+	if took := run.End.Sub(run.Start); took > 500*time.Millisecond {
+		t.Errorf("run took %v; want the time of the main process, not of the background one", took)
+	}
+	log, _ := os.ReadFile(store.LogPath(run))
+	if !strings.Contains(string(log), "now") || !strings.Contains(string(log), "late") {
+		t.Errorf("log = %q; want the output of both processes", log)
 	}
 }
 

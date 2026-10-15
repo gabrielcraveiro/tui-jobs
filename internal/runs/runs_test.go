@@ -26,12 +26,12 @@ func TestBeginFinishList(t *testing.T) {
 		t.Error("run must have no End before Finish")
 	}
 
-	if err := store.Finish(run, 3, ""); err != nil {
+	if err := store.Finish(run, 3, 4096, ""); err != nil {
 		t.Fatal(err)
 	}
 	list, _ = store.List("scrap", 0)
-	if list[0].End == nil || list[0].ExitCode != 3 {
-		t.Errorf("after Finish: End=%v ExitCode=%d; want End set and ExitCode 3", list[0].End, list[0].ExitCode)
+	if list[0].End == nil || list[0].ExitCode != 3 || list[0].PeakRSS != 4096 {
+		t.Errorf("after Finish: End=%v ExitCode=%d PeakRSS=%d; want End set, ExitCode 3, PeakRSS 4096", list[0].End, list[0].ExitCode, list[0].PeakRSS)
 	}
 	if data, _ := os.ReadFile(store.LogPath(list[0])); string(data) != "hello" {
 		t.Errorf("log = %q; want %q", data, "hello")
@@ -46,7 +46,7 @@ func TestListNewestFirstAndPrune(t *testing.T) {
 			t.Fatal(err)
 		}
 		logFile.Close()
-		store.Finish(run, i, "")
+		store.Finish(run, i, 0, "")
 	}
 
 	list, _ := store.List("scrap", 2)
@@ -63,6 +63,23 @@ func TestListNewestFirstAndPrune(t *testing.T) {
 	}
 	if _, err := os.Stat(store.LogPath(list[1])); err != nil {
 		t.Errorf("kept run lost its log: %v", err)
+	}
+}
+
+func TestTail(t *testing.T) {
+	store := runs.NewStore(t.TempDir())
+	run, logFile, _ := store.Begin("bot", []string{"cmd"})
+	fmt.Fprint(logFile, "first line\nsecond line\nthird line\n")
+	logFile.Close()
+
+	whole, err := store.Tail(*run, 1024)
+	if err != nil || whole != "first line\nsecond line\nthird line\n" {
+		t.Errorf("Tail(1024) = %q, %v; want the whole log", whole, err)
+	}
+	// 15 bytes começam no meio de "second line": a linha cortada sai.
+	end, _ := store.Tail(*run, 15)
+	if end != "third line\n" {
+		t.Errorf("Tail(15) = %q; want only the complete last line", end)
 	}
 }
 
