@@ -115,6 +115,61 @@ func TestBuild(t *testing.T) {
 	}
 }
 
+// fakeMemory devolve RSS fixo por pid e por cgroup.
+type fakeMemory struct {
+	byPID    map[int]int64
+	byCgroup map[string]int64
+}
+
+func (f fakeMemory) Descendants(pid int) int64 { return f.byPID[pid] }
+
+func (f fakeMemory) Cgroup(path string) int64 { return f.byCgroup[path] }
+
+func TestBuildMemory(t *testing.T) {
+	entries := crontab.Parse("0 * * * * bw run watch -- ./watch.py\n")
+	watch := finished(at(10, 0, 2), 4*time.Second, 0)
+	watch.PeakRSS = 90 << 20
+	history := fakeHistory{
+		"watch":    {watch},
+		"transito": {{Start: at(8, 0, 0), PID: alivePID}},
+	}
+	units := []systemd.Unit{
+		{Name: "ecovias-bot", ActiveState: "active", Since: at(10, 0, 0), Cgroup: "/app.slice/ecovias-bot.service"},
+		{Name: "stopped-bot", ActiveState: "inactive", Cgroup: "/app.slice/stopped-bot.service"},
+	}
+	memory := fakeMemory{
+		byPID:    map[int]int64{alivePID: 50 << 20},
+		byCgroup: map[string]int64{"/app.slice/ecovias-bot.service": 40 << 20, "/app.slice/stopped-bot.service": 1},
+	}
+
+	jobs, err := monitor.Build(monitor.Sources{
+		Crontab: entries, Units: units, History: history, Alive: alive, Memory: memory,
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	byName := map[string]monitor.Job{}
+	for _, j := range jobs {
+		byName[j.Name] = j
+	}
+	tests := []struct {
+		name         string
+		memory, peak int64
+	}{
+		{"watch", 0, 90 << 20},       // terminou: só o pico
+		{"transito", 50 << 20, 0},    // bw run rodando: filhos do bw
+		{"ecovias-bot", 40 << 20, 0}, // serviço rodando: processos do cgroup
+		{"stopped-bot", 0, 0},        // parado: sem medida
+	}
+	for _, tt := range tests {
+		j := byName[tt.name]
+		if j.Memory != tt.memory || j.PeakMemory != tt.peak {
+			t.Errorf("%s: Memory=%d PeakMemory=%d; want %d and %d", tt.name, j.Memory, j.PeakMemory, tt.memory, tt.peak)
+		}
+	}
+}
+
 func TestBuildNotLateWithinGrace(t *testing.T) {
 	entries := crontab.Parse("*/15 * * * * bw run scrap -- ./run.sh\n")
 	// Rodou 09:45; a das 10:00 ainda está dentro da folga às 10:01.

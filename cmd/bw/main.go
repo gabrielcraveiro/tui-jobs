@@ -11,6 +11,7 @@ import (
 
 	"github.com/gabrielcraveiro/tui-jobs/internal/crontab"
 	"github.com/gabrielcraveiro/tui-jobs/internal/monitor"
+	"github.com/gabrielcraveiro/tui-jobs/internal/procs"
 	"github.com/gabrielcraveiro/tui-jobs/internal/runner"
 	"github.com/gabrielcraveiro/tui-jobs/internal/runs"
 	"github.com/gabrielcraveiro/tui-jobs/internal/systemd"
@@ -175,6 +176,7 @@ func loadJobs(store *runs.Store, now time.Time) (jobs []monitor.Job, warning, er
 		Units:   units,
 		History: store,
 		Alive:   runs.Alive,
+		Memory:  procs.Read(),
 	}, now)
 	return jobs, errors.Join(warnings...), err
 }

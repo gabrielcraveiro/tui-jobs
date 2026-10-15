@@ -7,7 +7,8 @@ Cron does not record exit codes or output. `bw run` wraps a command and records
 each run. `bw` and `bw ls` join the crontab, the systemd user services and the
 run history. Design decisions:
 [ADR 0001](docs/adr/0001-wrapper-bw-run-com-historico-em-arquivos.md),
-[ADR 0002](docs/adr/0002-tui-com-bubble-tea-e-polling.md).
+[ADR 0002](docs/adr/0002-tui-com-bubble-tea-e-polling.md),
+[ADR 0003](docs/adr/0003-memoria-rss-da-arvore-de-processos.md).
 
 ## Install
 
@@ -34,6 +35,9 @@ columns wide, the list is on top and the log is below.
 The view refreshes every 3 seconds. The log follows new lines until you scroll
 up. Lines without `bw run` and disabled lines go to the end of the list.
 
+The list shows the memory of the jobs that run now. The header shows the
+total. The details show the memory now, or the peak of the last run.
+
 | Key              | Action                                              |
 |------------------|-----------------------------------------------------|
 | `↑` `↓` / `k` `j`| Select a job.                                       |
@@ -56,7 +60,8 @@ can work from the view and fail in cron.
 
 ### `bw run <job> -- <command> [args...]`
 
-Runs the command and records the run: start, end, exit code and output.
+Runs the command and records the run: start, end, exit code, peak memory and
+output.
 
 - `<job>`: letters, digits, `.`, `_` or `-`. The name is also the history directory.
 - `--` is mandatory. It separates the flags of the command from `bw`.
@@ -94,6 +99,14 @@ Lists all jobs. The sources are, in this order:
 | `restarting`  | The service crashed. systemd will start it again.                   |
 | `stopped`     | The service is not active.                                          |
 | `never ran`   | The job has no runs in the history.                                 |
+
+The `MEMORY` column shows RSS, the same value as `htop`:
+
+| Value      | Meaning                                                              |
+|------------|----------------------------------------------------------------------|
+| `50M`      | The job runs now. Sum of the processes below `bw run`, or of the processes in the cgroup of the systemd service. |
+| `89M peak` | The job does not run now. Peak RSS of the last run.                  |
+| `-`        | No value.                                                            |
 
 If one source fails (for example, no crontab), `bw ls` prints a warning and
 shows the other sources.

@@ -49,12 +49,19 @@ type History interface {
 	List(job string, limit int) ([]runs.Run, error)
 }
 
+// Memory mede a memória (RSS, em bytes) de processos vivos.
+type Memory interface {
+	Descendants(pid int) int64 // processos abaixo de pid, sem o próprio pid
+	Cgroup(path string) int64  // processos de um cgroup
+}
+
 // Sources reúne o que o monitor cruza para montar a lista de jobs.
 type Sources struct {
 	Crontab []crontab.Entry
 	Units   []systemd.Unit
 	History History
 	Alive   func(runs.Run) bool // diz se o processo de uma execução sem fim ainda existe
+	Memory  Memory              // nil deixa a memória zerada
 }
 
 // Job é uma linha do monitor.
@@ -71,6 +78,8 @@ type Job struct {
 	ExitCode    int       // da última execução que terminou
 	Restarts    int       // reinícios automáticos feitos pelo systemd
 	LastRun     *runs.Run // nil para systemd e para job que nunca rodou
+	Memory      int64     // RSS agora, em bytes; zero se não está rodando
+	PeakMemory  int64     // maior RSS da última execução que terminou, em bytes
 }
 
 // Build monta a lista: primeiro os jobs do crontab, na ordem do arquivo;
@@ -97,7 +106,7 @@ func Build(src Sources, now time.Time) ([]Job, error) {
 	for _, unit := range src.Units {
 		if !seen[unit.Name] {
 			seen[unit.Name] = true
-			jobs = append(jobs, unitJob(unit, now))
+			jobs = append(jobs, unitJob(unit, src.Memory, now))
 		}
 	}
 
@@ -173,10 +182,14 @@ func (j *Job) loadLastRun(src Sources, schedule cron.Schedule, now time.Time) er
 	}
 	last := &list[0]
 	j.LastRun, j.Started, j.Duration, j.ExitCode = last, last.Start, last.Duration(now), last.ExitCode
+	j.PeakMemory = last.PeakRSS
 
 	switch {
 	case last.End == nil && src.Alive(*last):
 		j.State = Running
+		if src.Memory != nil {
+			j.Memory = src.Memory.Descendants(last.PID)
+		}
 	case last.End == nil:
 		j.State = Interrupted
 	case schedule != nil && schedule.Next(last.Start).Add(lateGrace).Before(now):
@@ -189,7 +202,7 @@ func (j *Job) loadLastRun(src Sources, schedule cron.Schedule, now time.Time) er
 	return nil
 }
 
-func unitJob(u systemd.Unit, now time.Time) Job {
+func unitJob(u systemd.Unit, mem Memory, now time.Time) Job {
 	job := Job{
 		Name:        u.Name,
 		Source:      Systemd,
@@ -215,6 +228,10 @@ func unitJob(u systemd.Unit, now time.Time) Job {
 		job.Duration = now.Sub(u.Since)
 	case u.Until.After(u.Since):
 		job.Duration = u.Until.Sub(u.Since)
+	}
+
+	if job.State == Running && mem != nil && u.Cgroup != "" {
+		job.Memory = mem.Cgroup(u.Cgroup)
 	}
 	return job
 }

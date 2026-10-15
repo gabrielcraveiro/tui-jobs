@@ -26,9 +26,10 @@ type Unit struct {
 	Until       time.Time // quando saiu do estado ativo pela última vez
 	ExitStatus  int       // exit code da última vez que o processo principal terminou
 	Restarts    int       // reinícios automáticos desde o último start manual
+	Cgroup      string    // caminho do cgroup, onde estão os processos do serviço
 }
 
-const properties = "Id,Description,ActiveState,SubState,ActiveEnterTimestamp,InactiveEnterTimestamp,ExecMainStatus,NRestarts"
+const properties = "Id,Description,ActiveState,SubState,ActiveEnterTimestamp,InactiveEnterTimestamp,ExecMainStatus,NRestarts,ControlGroup"
 
 // Load devolve os serviços definidos em ~/.config/systemd/user. Serviços do
 // sistema e de pacotes ficam de fora: não foram criados pelo usuário.
@@ -108,6 +109,7 @@ func parseShow(text string) []Unit {
 			Until:       parseTimestamp(props["InactiveEnterTimestamp"]),
 			ExitStatus:  atoi(props["ExecMainStatus"]),
 			Restarts:    atoi(props["NRestarts"]),
+			Cgroup:      props["ControlGroup"],
 		})
 	}
 	return units

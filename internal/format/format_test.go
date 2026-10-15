@@ -60,6 +60,28 @@ func TestLabel(t *testing.T) {
 	}
 }
 
+func TestBytesAndMemory(t *testing.T) {
+	bytes := map[int64]string{0: "-", 512 << 10: "512K", 85 << 20: "85M", 1288 << 20: "1.3G"}
+	for n, want := range bytes {
+		if got := format.Bytes(n); got != want {
+			t.Errorf("Bytes(%d) = %q; want %q", n, got, want)
+		}
+	}
+	memory := []struct {
+		job  monitor.Job
+		want string
+	}{
+		{monitor.Job{Memory: 50 << 20, PeakMemory: 90 << 20}, "50M"},
+		{monitor.Job{PeakMemory: 90 << 20}, "90M peak"},
+		{monitor.Job{}, "-"},
+	}
+	for _, tt := range memory {
+		if got := format.Memory(tt.job); got != tt.want {
+			t.Errorf("Memory(%+v) = %q; want %q", tt.job, got, tt.want)
+		}
+	}
+}
+
 func TestTruncate(t *testing.T) {
 	if got := format.Truncate("pokescrap/run.sh", 8); got != "pokescr…" {
 		t.Errorf("Truncate = %q; want %q", got, "pokescr…")
