@@ -59,16 +59,18 @@ type Sources struct {
 
 // Job é uma linha do monitor.
 type Job struct {
-	Name     string
-	Source   Source
-	Schedule string        // agenda do crontab; vazio para manual e systemd
-	Started  time.Time     // início da última execução; zero se nunca rodou
-	Duration time.Duration // da última execução, ou há quanto tempo roda
-	Next     time.Time     // próxima execução agendada; zero se não há
-	State    State
-	ExitCode int       // da última execução que terminou
-	Restarts int       // reinícios automáticos feitos pelo systemd
-	LastRun  *runs.Run // nil para systemd e para job que nunca rodou
+	Name        string
+	Source      Source
+	Command     string        // linha do crontab ou comando do bw run; vazio para systemd
+	Description string        // descrição do serviço systemd
+	Schedule    string        // agenda do crontab; vazio para manual e systemd
+	Started     time.Time     // início da última execução; zero se nunca rodou
+	Duration    time.Duration // da última execução, ou há quanto tempo roda
+	Next        time.Time     // próxima execução agendada; zero se não há
+	State       State
+	ExitCode    int       // da última execução que terminou
+	Restarts    int       // reinícios automáticos feitos pelo systemd
+	LastRun     *runs.Run // nil para systemd e para job que nunca rodou
 }
 
 // Build monta a lista: primeiro os jobs do crontab, na ordem do arquivo;
@@ -111,13 +113,21 @@ func Build(src Sources, now time.Time) ([]Job, error) {
 		if err := job.loadLastRun(src, nil, now); err != nil {
 			return nil, err
 		}
+		if job.LastRun != nil {
+			job.Command = strings.Join(job.LastRun.Command, " ")
+		}
 		jobs = append(jobs, job)
 	}
 	return jobs, nil
 }
 
 func cronJob(e crontab.Entry, src Sources, now time.Time) (Job, error) {
-	job := Job{Name: cmp.Or(e.Job, e.Comment, commandLabel(e.Command)), Source: Cron, Schedule: e.Spec}
+	job := Job{
+		Name:     cmp.Or(e.Job, e.Comment, commandLabel(e.Command)),
+		Source:   Cron,
+		Command:  e.Command,
+		Schedule: e.Spec,
+	}
 	if e.Schedule != nil && !e.Disabled {
 		job.Next = e.Schedule.Next(now)
 	}
@@ -181,11 +191,12 @@ func (j *Job) loadLastRun(src Sources, schedule cron.Schedule, now time.Time) er
 
 func unitJob(u systemd.Unit, now time.Time) Job {
 	job := Job{
-		Name:     u.Name,
-		Source:   Systemd,
-		Started:  u.Since,
-		ExitCode: u.ExitStatus,
-		Restarts: u.Restarts,
+		Name:        u.Name,
+		Source:      Systemd,
+		Description: u.Description,
+		Started:     u.Since,
+		ExitCode:    u.ExitStatus,
+		Restarts:    u.Restarts,
 	}
 	switch {
 	case u.SubState == "auto-restart":

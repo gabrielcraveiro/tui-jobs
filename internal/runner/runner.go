@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/gabrielcraveiro/tui-jobs/internal/runs"
@@ -32,14 +33,20 @@ func Exec(store *runs.Store, job string, command []string, stdout, stderr io.Wri
 	defer logFile.Close()
 
 	// Espelhar no stdout mantém funcionando os ">> arquivo.log" que já existem no crontab.
-	code, execErr := execute(command, io.MultiWriter(stdout, logFile), io.MultiWriter(stderr, logFile))
+	code, waitOutput, execErr := execute(command, io.MultiWriter(stdout, logFile), io.MultiWriter(stderr, logFile))
 	errMsg := ""
 	if execErr != nil {
 		errMsg = execErr.Error()
-		fmt.Fprintf(io.MultiWriter(stderr, logFile), "bw: %v\n", execErr)
 	}
 	if err := store.Finish(run, code, errMsg); err != nil {
 		fmt.Fprintf(stderr, "bw: cannot record end of run: %v\n", err)
+	}
+	// O fim do job já está gravado. Um processo que ele deixou em background
+	// pode ter herdado a saída: o bw segue copiando para o log até ela fechar,
+	// como o cron faz.
+	waitOutput()
+	if execErr != nil {
+		fmt.Fprintf(io.MultiWriter(stderr, logFile), "bw: %v\n", execErr)
 	}
 	if err := store.Prune(job, keepRuns); err != nil {
 		fmt.Fprintf(stderr, "bw: cannot prune old runs: %v\n", err)
@@ -48,36 +55,84 @@ func Exec(store *runs.Store, job string, command []string, stdout, stderr io.Wri
 }
 
 func executeUnrecorded(command []string, stdout, stderr io.Writer) int {
-	code, err := execute(command, stdout, stderr)
+	code, waitOutput, err := execute(command, stdout, stderr)
+	waitOutput()
 	if err != nil {
 		fmt.Fprintf(stderr, "bw: %v\n", err)
 	}
 	return code
 }
 
-// execute devolve o exit code no padrão do shell: 128+N quando o processo
-// morre pelo sinal N e 127 quando o comando nem chega a iniciar.
-func execute(command []string, stdout, stderr io.Writer) (int, error) {
-	cmd := exec.Command(command[0], command[1:]...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, stdout, stderr
-	if err := cmd.Start(); err != nil {
-		return 127, err
+// execute espera só o processo principal e devolve o exit code no padrão do
+// shell: 128+N quando o processo morre pelo sinal N e 127 quando o comando
+// nem chega a iniciar. A cópia da saída continua até todos os processos que a
+// herdaram fecharem; waitOutput espera esse fim.
+func execute(command []string, stdout, stderr io.Writer) (code int, waitOutput func(), err error) {
+	var copying sync.WaitGroup
+	var mu sync.Mutex
+	outW, err := pipeTo(lockedWriter{&mu, stdout}, &copying)
+	if err != nil {
+		return 1, copying.Wait, err
 	}
-	stop := forwardSignals(cmd.Process)
-	defer stop()
+	errW, err := pipeTo(lockedWriter{&mu, stderr}, &copying)
+	if err != nil {
+		outW.Close()
+		return 1, copying.Wait, err
+	}
 
-	err := cmd.Wait()
+	cmd := exec.Command(command[0], command[1:]...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, outW, errW
+	startErr := cmd.Start()
+	// A ponta de escrita fica só com o processo e quem herdar dele. Sem fechar
+	// a nossa cópia, a leitura nunca chegaria ao fim.
+	outW.Close()
+	errW.Close()
+	if startErr != nil {
+		return 127, copying.Wait, startErr
+	}
+
+	stop := forwardSignals(cmd.Process)
+	err = cmd.Wait()
+	stop()
 	if cmd.ProcessState == nil {
-		return 1, err
+		return 1, copying.Wait, err
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		err = nil // exit code diferente de zero é resultado do job, não erro do bw
 	}
 	if status, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok && status.Signaled() {
-		return 128 + int(status.Signal()), err
+		return 128 + int(status.Signal()), copying.Wait, err
 	}
-	return cmd.ProcessState.ExitCode(), err
+	return cmd.ProcessState.ExitCode(), copying.Wait, err
+}
+
+// pipeTo devolve a ponta de escrita de um pipe copiado para dst. Com um
+// *os.File no Stdout, o Wait do exec volta quando o processo sai, em vez de
+// esperar todo mundo que herdou a saída.
+func pipeTo(dst io.Writer, copying *sync.WaitGroup) (*os.File, error) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		return nil, err
+	}
+	copying.Go(func() {
+		defer r.Close()
+		_, _ = io.Copy(dst, r)
+	})
+	return w, nil
+}
+
+// lockedWriter serializa as cópias de stdout e stderr, que podem cair no
+// mesmo destino.
+type lockedWriter struct {
+	mu *sync.Mutex
+	w  io.Writer
+}
+
+func (l lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
 }
 
 // forwardSignals repassa SIGTERM e SIGHUP ao filho, para que um "kill" no bw

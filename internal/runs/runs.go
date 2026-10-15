@@ -6,9 +6,11 @@
 package runs
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -185,6 +187,32 @@ func (s *Store) Prune(job string, keep int) error {
 // LogPath devolve o arquivo com stdout+stderr da execução.
 func (s *Store) LogPath(r Run) string {
 	return s.path(r.Job, r.id, ".log")
+}
+
+// Tail devolve no máximo os últimos maxBytes do log da execução. Bot de longa
+// duração gera log grande, e a tela só mostra o fim.
+func (s *Store) Tail(r Run, maxBytes int64) (string, error) {
+	f, err := os.Open(s.LogPath(r))
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	offset := max(info.Size()-maxBytes, 0)
+	data := make([]byte, info.Size()-offset)
+	if _, err := f.ReadAt(data, offset); err != nil && !errors.Is(err, io.EOF) {
+		return "", err
+	}
+	if offset > 0 {
+		// A primeira linha quase sempre vem cortada no meio.
+		if i := bytes.IndexByte(data, '\n'); i >= 0 {
+			data = data[i+1:]
+		}
+	}
+	return string(data), nil
 }
 
 // Alive diz se o processo do bw run de r ainda existe. O boot ID vem antes do
