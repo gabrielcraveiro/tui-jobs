@@ -23,6 +23,23 @@ func TestUsageErrors(t *testing.T) {
 	}
 }
 
+func TestWithoutHistoryDir(t *testing.T) {
+	t.Setenv("BOTWATCHER_DIR", "")
+	t.Setenv("XDG_STATE_HOME", "")
+	t.Setenv("HOME", "")
+	var stdout, stderr bytes.Buffer
+
+	if code := run([]string{"run", "job", "--", "sh", "-c", "exit 6"}, &stdout, &stderr); code != 6 {
+		t.Errorf("bw run: exit code = %d; want 6, the job runs without history", code)
+	}
+	if !strings.Contains(stderr.String(), "no history directory") {
+		t.Errorf("bw run: stderr = %q; want a warning", stderr.String())
+	}
+	if code := run([]string{"ls"}, &stdout, &stderr); code != 1 {
+		t.Errorf("bw ls: exit code = %d; want 1", code)
+	}
+}
+
 func TestRunThenLogs(t *testing.T) {
 	t.Setenv("BOTWATCHER_DIR", t.TempDir())
 	var stdout, stderr bytes.Buffer
