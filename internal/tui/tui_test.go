@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -195,6 +196,33 @@ func TestRunNowRefusesUnwrappedLine(t *testing.T) {
 	}
 	if !strings.Contains(screen(m), "not wrapped") {
 		t.Error("screen must explain why the job cannot run")
+	}
+}
+
+// O log pode trazer texto de terceiros (mensagem de Telegram, página
+// raspada). Nada nele pode virar comando para o terminal.
+func TestLogCannotControlTheTerminal(t *testing.T) {
+	hostile := "hello \x1b]52;c;ZXZpbA==\x07world\x1b]0;pwned\x07 \x1b[2J\x1b[31mred\x1b[0m" +
+		" \u009b2J\u009d0;c1\a \x1b lone-esc\b\r\tdone\n"
+	b := sampleBackend()
+	b.logs["pokescrap"] = hostile
+
+	out := screen(start(t, b, 120, 30))
+
+	for _, word := range []string{"hello", "world", "red", "done"} {
+		if !strings.Contains(out, word) {
+			t.Errorf("screen must keep the text %q", word)
+		}
+	}
+	for _, seq := range []string{"\x1b]", "\x1b[2J", "\a", "\b", "\r", "\u009b", "\u009d", "ZXZpbA", "pwned"} {
+		if strings.Contains(out, seq) {
+			t.Errorf("screen must not contain %q", seq)
+		}
+	}
+	for _, r := range cleanLog(hostile) {
+		if r != '\n' && unicode.IsControl(r) {
+			t.Errorf("cleanLog kept control character %U", r)
+		}
 	}
 }
 

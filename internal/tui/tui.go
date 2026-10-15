@@ -6,9 +6,11 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/gabrielcraveiro/tui-jobs/internal/monitor"
 )
@@ -248,9 +250,25 @@ func sortForScreen(jobs []monitor.Job) []monitor.Job {
 	return sorted
 }
 
-// logCleaner troca o que o terminal desenha diferente do que o layout mede:
-// tab vira espaços e o \r de barras de progresso some.
-var logCleaner = strings.NewReplacer("\t", "    ", "\r", "")
+// tabSpaces troca o tab, que o terminal desenha com largura variável e o
+// layout mede como uma coluna.
+var tabSpaces = strings.NewReplacer("\t", "    ")
+
+// cleanLog deixa no log só texto imprimível. O log vem de bots que gravam
+// dado de fora (mensagem do Telegram, página raspada): uma sequência de
+// escape ali mexeria no terminal de quem olha, por exemplo trocando o título
+// ou escrevendo no clipboard (OSC 52). O Strip remove a sequência inteira,
+// para o conteúdo dela não vazar como texto; o que sobra de controle (ESC
+// solto, BEL, \r de barra de progresso, C1) é descartado.
+func cleanLog(text string) string {
+	text = tabSpaces.Replace(ansi.Strip(text))
+	return strings.Map(func(r rune) rune {
+		if r != '\n' && unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, text)
+}
 
 func (m *model) setLog(msg logMsg) {
 	job, ok := m.selected()
@@ -263,7 +281,7 @@ func (m *model) setLog(msg logMsg) {
 	}
 	// Segue o fim do log, a não ser que o usuário tenha rolado para cima.
 	follow := m.logJob != msg.job || m.log.AtBottom()
-	m.log.SetContent(logCleaner.Replace(strings.TrimRight(text, "\n")))
+	m.log.SetContent(cleanLog(strings.TrimRight(text, "\n")))
 	if follow {
 		m.log.GotoBottom()
 	}
