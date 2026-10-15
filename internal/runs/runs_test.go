@@ -113,6 +113,32 @@ func TestAlive(t *testing.T) {
 	}
 }
 
+func TestDefaultDir(t *testing.T) {
+	tests := []struct {
+		name, botwatcherDir, xdgState, home string
+		want                                string
+		wantErr                             bool
+	}{
+		{name: "BOTWATCHER_DIR wins", botwatcherDir: "/b", xdgState: "/x", home: "/h", want: "/b"},
+		{name: "XDG_STATE_HOME", xdgState: "/x", home: "/h", want: "/x/botwatcher"},
+		{name: "HOME", home: "/h", want: "/h/.local/state/botwatcher"},
+		{name: "nothing set", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("BOTWATCHER_DIR", tt.botwatcherDir)
+			t.Setenv("XDG_STATE_HOME", tt.xdgState)
+			t.Setenv("HOME", tt.home)
+
+			got, err := runs.DefaultDir()
+
+			if (err != nil) != tt.wantErr || got != tt.want {
+				t.Errorf("DefaultDir() = %q, %v; want %q, error: %v", got, err, tt.want, tt.wantErr)
+			}
+		})
+	}
+}
+
 func exitCodes(list []runs.Run) []int {
 	var codes []int
 	for _, r := range list {

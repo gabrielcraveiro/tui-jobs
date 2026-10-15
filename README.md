@@ -94,7 +94,9 @@ For lines with `cd` or `export`, put `bw run` before the last command:
 ## History
 
 Default directory: `~/.local/state/botwatcher`. Set `BOTWATCHER_DIR` or
-`XDG_STATE_HOME` to change it.
+`XDG_STATE_HOME` to change it. If `HOME`, `BOTWATCHER_DIR` and `XDG_STATE_HOME`
+are all empty, `bw run` runs the command and records nothing, and `bw ls` and
+`bw logs` fail.
 
 ```
 <dir>/<job>/20261015T124501.123456Z-4242.json   # metadata of the run

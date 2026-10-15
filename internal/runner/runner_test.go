@@ -85,6 +85,16 @@ func TestExecRunsCommandWhenHistoryFails(t *testing.T) {
 	}
 }
 
+func TestExecWithoutStoreRunsCommand(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	code := runner.Exec(nil, "job", []string{"sh", "-c", "echo hi; exit 6"}, &stdout, &stderr)
+
+	if code != 6 || stdout.String() != "hi\n" {
+		t.Errorf("Exec(nil) = %d, stdout %q; want 6 and the command output", code, stdout.String())
+	}
+}
+
 func lastRun(t *testing.T, store *runs.Store, job string) runs.Run {
 	t.Helper()
 	list, err := store.List(job, 1)

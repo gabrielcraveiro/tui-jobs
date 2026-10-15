@@ -18,17 +18,16 @@ import (
 const keepRuns = 50
 
 // Exec roda command, espelha a saída no stdout/stderr e no log da execução, e
-// devolve o exit code que o bw deve usar.
+// devolve o exit code que o bw deve usar. Com store nil, roda sem registrar.
 func Exec(store *runs.Store, job string, command []string, stdout, stderr io.Writer) int {
+	if store == nil {
+		return executeUnrecorded(command, stdout, stderr)
+	}
 	run, logFile, err := store.Begin(job, command)
 	if err != nil {
 		// O job importa mais que o histórico: sem conseguir registrar, roda mesmo assim.
 		fmt.Fprintf(stderr, "bw: cannot record run: %v\n", err)
-		code, err := execute(command, stdout, stderr)
-		if err != nil {
-			fmt.Fprintf(stderr, "bw: %v\n", err)
-		}
-		return code
+		return executeUnrecorded(command, stdout, stderr)
 	}
 	defer logFile.Close()
 
@@ -44,6 +43,14 @@ func Exec(store *runs.Store, job string, command []string, stdout, stderr io.Wri
 	}
 	if err := store.Prune(job, keepRuns); err != nil {
 		fmt.Fprintf(stderr, "bw: cannot prune old runs: %v\n", err)
+	}
+	return code
+}
+
+func executeUnrecorded(command []string, stdout, stderr io.Writer) int {
+	code, err := execute(command, stdout, stderr)
+	if err != nil {
+		fmt.Fprintf(stderr, "bw: %v\n", err)
 	}
 	return code
 }

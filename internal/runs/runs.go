@@ -58,20 +58,21 @@ func NewStore(dir string) *Store {
 }
 
 // DefaultDir devolve onde o histórico fica: $BOTWATCHER_DIR,
-// $XDG_STATE_HOME/botwatcher ou ~/.local/state/botwatcher.
-func DefaultDir() string {
+// $XDG_STATE_HOME/botwatcher ou ~/.local/state/botwatcher. Sem nenhum deles
+// devolve erro em vez de cair num caminho fixo do /tmp: outro usuário poderia
+// criar esse caminho antes (ou um symlink nele) e ler os logs.
+func DefaultDir() (string, error) {
 	if dir := os.Getenv("BOTWATCHER_DIR"); dir != "" {
-		return dir
+		return dir, nil
 	}
 	if dir := os.Getenv("XDG_STATE_HOME"); dir != "" {
-		return filepath.Join(dir, "botwatcher")
+		return filepath.Join(dir, "botwatcher"), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		// Sem HOME o bw run ainda precisa rodar o job; grava no /tmp em vez de falhar.
-		return filepath.Join(os.TempDir(), "botwatcher-"+strconv.Itoa(os.Getuid()))
+		return "", fmt.Errorf("no history directory, set HOME or BOTWATCHER_DIR: %w", err)
 	}
-	return filepath.Join(home, ".local", "state", "botwatcher")
+	return filepath.Join(home, ".local", "state", "botwatcher"), nil
 }
 
 // Begin grava o início de uma execução e abre o arquivo de log dela.
