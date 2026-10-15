@@ -66,6 +66,23 @@ func TestListNewestFirstAndPrune(t *testing.T) {
 	}
 }
 
+func TestTail(t *testing.T) {
+	store := runs.NewStore(t.TempDir())
+	run, logFile, _ := store.Begin("bot", []string{"cmd"})
+	fmt.Fprint(logFile, "first line\nsecond line\nthird line\n")
+	logFile.Close()
+
+	whole, err := store.Tail(*run, 1024)
+	if err != nil || whole != "first line\nsecond line\nthird line\n" {
+		t.Errorf("Tail(1024) = %q, %v; want the whole log", whole, err)
+	}
+	// 15 bytes começam no meio de "second line": a linha cortada sai.
+	end, _ := store.Tail(*run, 15)
+	if end != "third line\n" {
+		t.Errorf("Tail(15) = %q; want only the complete last line", end)
+	}
+}
+
 func TestJobs(t *testing.T) {
 	store := runs.NewStore(t.TempDir())
 	if jobs, err := store.Jobs(); err != nil || len(jobs) != 0 {

@@ -45,12 +45,22 @@ func Load() ([]Unit, error) {
 	return parseShow(string(out)), nil
 }
 
-// WriteLogs escreve em w as últimas lines linhas do journal do serviço.
+// WriteLogs escreve em w as últimas lines linhas do journal do serviço. O
+// hostname fica de fora: é sempre a mesma máquina e só ocupa espaço na tela.
 func WriteLogs(w io.Writer, name string, lines int) error {
 	cmd := exec.Command("journalctl", "--user", "--unit", name+".service",
-		"--lines", strconv.Itoa(lines), "--no-pager")
+		"--lines", strconv.Itoa(lines), "--no-pager", "--no-hostname")
 	cmd.Stdout, cmd.Stderr = w, w
 	return cmd.Run()
+}
+
+// Restart reinicia o serviço. Com o serviço parado, só inicia.
+func Restart(name string) error {
+	out, err := exec.Command("systemctl", "--user", "restart", name+".service").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("systemctl --user restart %s: %w: %s", name, err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func userServices() ([]string, error) {
